@@ -94,6 +94,14 @@ func setupViews(db *sql.DB, dataDir string) error {
 				LAB, CON, LD, GREEN, REF, IND,
 				"Other parties / candidates"           AS other_votes
 			FROM read_csv_auto('%s')`, filepath.Join(dataDir, "local_election_ward_2026.csv")),
+
+		// Bridge WD25 (uk_wards) and WD26 (local_2026) by normalised (ward_name, lad_name).
+		// "Crawcrook and Greenside" / "Crawcrook & Greenside" both → "crawcrookandgreenside".
+		`CREATE OR REPLACE MACRO ward_key(ward_name, lad_name) AS
+			regexp_replace(
+				replace(lower(coalesce(ward_name,'') || '|' || coalesce(lad_name,'')), '&', 'and'),
+				'[^a-z0-9|]+', '', 'g'
+			)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {

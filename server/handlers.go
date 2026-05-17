@@ -432,11 +432,20 @@ func (s *server) ward(w http.ResponseWriter, r *http.Request) {
 		s1, s2, s3   sql.NullString
 		vLab, vCon, vLD, vGreen, vRef, vInd, vOther sql.NullInt64
 	)
+	// Match by WD26 ward_code if it happens to be the same vintage, otherwise
+	// fall back to a (normalised ward_name, lad_name) bridge — local_2026 uses
+	// WD26 boundary codes while uk_wards uses WD25.
 	err = s.db.QueryRowContext(r.Context(), `
+		WITH target AS (
+			SELECT ward_key(ward_name, lad_name) AS k FROM uk_wards WHERE ward_code = ? LIMIT 1
+		)
 		SELECT seats, election_type, seat1_winner, seat2_winner, seat3_winner,
 			LAB, CON, LD, GREEN, REF, IND, other_votes
-		FROM local_2026 WHERE ward_code = ? LIMIT 1
-	`, code).Scan(&seats, &electionType, &s1, &s2, &s3, &vLab, &vCon, &vLD, &vGreen, &vRef, &vInd, &vOther)
+		FROM local_2026
+		WHERE ward_code = ?
+		   OR ward_key(ward_name, lad_name) = (SELECT k FROM target)
+		LIMIT 1
+	`, code, code).Scan(&seats, &electionType, &s1, &s2, &s3, &vLab, &vCon, &vLD, &vGreen, &vRef, &vInd, &vOther)
 	if err == nil {
 		blk := &local2026Block{}
 		if seats.Valid {
@@ -522,10 +531,13 @@ func (s *server) council(w http.ResponseWriter, r *http.Request) {
 
 	// Ward list + constituencies per ward
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT ward_code, ward_name, string_agg(pcon_name, ' / ' ORDER BY is_primary_by_area DESC NULLS LAST, pcon_name) AS pcons
+		SELECT ward_code,
+			any_value(ward_name)               AS ward_name,
+			any_value(ward_key(ward_name, lad_name)) AS k,
+			string_agg(pcon_name, ' / ' ORDER BY is_primary_by_area DESC NULLS LAST, pcon_name) AS pcons
 		FROM uk_wards
 		WHERE lad_code = ?
-		GROUP BY ward_code, ward_name
+		GROUP BY ward_code
 		ORDER BY ward_name
 	`, code)
 	if err != nil {
@@ -533,25 +545,36 @@ func (s *server) council(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	wardCodes := []string{}
+
+	// Two indexes so a local_2026 row can attach by either its (matching)
+	// WD26 code or by the normalised (ward_name, lad_name) bridge.
+	codeIndex := map[string]int{}
+	keyIndex := map[string]int{}
 	for rows.Next() {
 		var wr councilWardRow
-		var pcons string
-		if err := rows.Scan(&wr.WardCode, &wr.WardName, &pcons); err != nil {
+		var key, pcons string
+		if err := rows.Scan(&wr.WardCode, &wr.WardName, &key, &pcons); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
 		if pcons != "" {
 			wr.Constituencies = strings.Split(pcons, " / ")
 		}
+		idx := len(resp.Wards)
 		resp.Wards = append(resp.Wards, wr)
-		wardCodes = append(wardCodes, wr.WardCode)
+		codeIndex[wr.WardCode] = idx
+		if key != "" {
+			keyIndex[key] = idx
+		}
 	}
 	resp.WardCount = len(resp.Wards)
 
-	// 2026 ward-level votes by ward_code OR by lad_name (some wards lack ONS code)
+	// 2026 ward-level votes by lad_name (some rows lack an ONS code entirely).
 	localRows, err := s.db.QueryContext(r.Context(), `
-		SELECT ward_code, ward_name, COALESCE(seat1_winner,''), COALESCE(seat2_winner,''), COALESCE(seat3_winner,''),
+		SELECT ward_code,
+			ward_name,
+			ward_key(ward_name, lad_name) AS k,
+			COALESCE(seat1_winner,''), COALESCE(seat2_winner,''), COALESCE(seat3_winner,''),
 			LAB, CON, LD, GREEN, REF, IND, other_votes
 		FROM local_2026
 		WHERE lad_name = ?
@@ -562,11 +585,6 @@ func (s *server) council(w http.ResponseWriter, r *http.Request) {
 	}
 	defer localRows.Close()
 
-	wardIndex := map[string]int{}
-	for i, w0 := range resp.Wards {
-		wardIndex[w0.WardCode] = i
-	}
-
 	var (
 		totLab, totCon, totLD, totGreen, totRef, totInd, totOther int64
 	)
@@ -574,10 +592,11 @@ func (s *server) council(w http.ResponseWriter, r *http.Request) {
 		var (
 			wardCode sql.NullString
 			wardName string
+			key      string
 			s1, s2, s3 string
 			vLab, vCon, vLD, vGreen, vRef, vInd, vOther int64
 		)
-		if err := localRows.Scan(&wardCode, &wardName, &s1, &s2, &s3, &vLab, &vCon, &vLD, &vGreen, &vRef, &vInd, &vOther); err != nil {
+		if err := localRows.Scan(&wardCode, &wardName, &key, &s1, &s2, &s3, &vLab, &vCon, &vLD, &vGreen, &vRef, &vInd, &vOther); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -613,14 +632,24 @@ func (s *server) council(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		idx := -1
 		if wardCode.Valid {
-			if idx, ok := wardIndex[wardCode.String]; ok {
-				resp.Wards[idx].Local2026 = entries
-				resp.Wards[idx].SeatWinners = winners
-				continue
+			if i, ok := codeIndex[wardCode.String]; ok {
+				idx = i
 			}
 		}
-		// Fallback: no ONS code or no match — append as standalone row.
+		if idx < 0 && key != "" {
+			if i, ok := keyIndex[key]; ok {
+				idx = i
+			}
+		}
+		if idx >= 0 {
+			resp.Wards[idx].Local2026 = entries
+			resp.Wards[idx].SeatWinners = winners
+			continue
+		}
+		// No match — emit as a standalone row (e.g. new unitary wards with no
+		// WD25 entry in uk_wards).
 		resp.Wards = append(resp.Wards, councilWardRow{
 			WardCode: "", WardName: wardName, Local2026: entries, SeatWinners: winners,
 		})
