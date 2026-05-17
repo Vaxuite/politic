@@ -1,0 +1,3 @@
+I want to build a web dashboard so that I can drill down into UK political data and draw insights from it. I want the front end to be build in vue js and the backend a single service in go (ive already created this) but you need to create an additional folder the dashboard called dashboard in the politic folder. I want the go service to use duckdb to query the data so can you set this up like https://duckdb.org/docs/current/clients/go .
+
+https://electionresults.parliament.uk/general-elections/5/constituency-areas
