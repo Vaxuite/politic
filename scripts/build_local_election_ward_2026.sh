@@ -3,7 +3,7 @@
 # data/local_election_ward.csv (the 2025 file), with ONS ward codes
 # resolved by joining on ward name + council against ONS lookups.
 #
-# Output: data/local_election_ward_2026.csv
+# Output: data/local_election_ward_2026.parquet
 #
 # Every ward in the 2026 raw file is included (currently 2,554 rows).
 # Wards we can't resolve to an ONS code (the brand-new Surrey unitary
@@ -14,7 +14,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="$ROOT/data"
 SRC="$DATA/2026_local_election.csv"
-OUTPUT="$DATA/local_election_ward_2026.csv"
+OUTPUT="$DATA/local_election_ward_2026.parquet"
 
 [[ -f "$SRC" ]] || { echo "Missing $SRC" >&2; exit 1; }
 
@@ -141,7 +141,7 @@ COPY (
   FROM raw r
   LEFT JOIN resolved res USING (rn)
   ORDER BY r.council_name, r.ward_name
-) TO '$OUTPUT' (HEADER, DELIMITER ',');
+) TO '$OUTPUT' (FORMAT PARQUET);
 SQL
 
 # Report row counts and any unresolved (no ONS code)

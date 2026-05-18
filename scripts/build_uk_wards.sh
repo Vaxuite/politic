@@ -29,7 +29,7 @@ LOOKUP_26="$DATA/wd26_lad26_lu.csv"   # UK-wide ward -> LAD (May 2026 vintage)
 LOOKUP_25="$DATA/wd25_pcon_lu.csv"    # WD25 -> PCON24 (used as NI fallback only)
 OSBL_DIR="$DATA/osbl"
 OSBL_ZIP="$OSBL_DIR/bdline.zip"
-OUTPUT="$DATA/uk_wards.csv"
+OUTPUT="$DATA/uk_wards.parquet"
 
 # 1. ONS Ward (May 2026) -> LAD (May 2026) UK-wide lookup
 if [[ ! -f "$LOOKUP_26" ]]; then
@@ -72,8 +72,15 @@ CREATE OR REPLACE TEMP TABLE ward_geom AS
   FROM ST_Read('$OSBL_DIR/Data/GB/unitary_electoral_division_region.shp');
 
 -- Westminster constituency polygons (PCON24 — no boundary review since 2024).
+-- Strip the " Boro Const" / " Co Const" / " Burgh Const" / " County Const"
+-- suffix that Boundary-Line tacks onto NAME, so it matches the clean names
+-- used in election_results.parquet ("Blaydon and Consett", not
+-- "Blaydon and Consett Co Const").
 CREATE OR REPLACE TEMP TABLE pcon_geom AS
-  SELECT CODE AS pcon_code, NAME AS pcon_name, geom
+  SELECT
+    CODE AS pcon_code,
+    regexp_replace(NAME, ' (Boro Const|Co Const|Burgh Const|County Const)$', '') AS pcon_name,
+    geom
   FROM ST_Read('$OSBL_DIR/Data/GB/westminster_const_region.shp');
 
 -- UK-wide canonical ward list (May 2026 vintage).
@@ -136,7 +143,7 @@ COPY (
     ROUND(area_m2 / 1e6, 4) AS intersection_area_km2
   FROM all_rows
   ORDER BY ward_code, is_primary_by_area DESC NULLS LAST, intersection_area_km2 DESC NULLS LAST
-) TO '$OUTPUT' (HEADER, DELIMITER ',');
+) TO '$OUTPUT' (FORMAT PARQUET);
 SQL
 
 duckdb -c "
@@ -147,4 +154,4 @@ SELECT
   SUM(CASE WHEN pcon_code IS NULL THEN 1 ELSE 0 END) AS no_pcon
 FROM '$OUTPUT';
 "
-echo "Wrote $(wc -l < "$OUTPUT") lines to $OUTPUT"
+echo "Wrote $OUTPUT"
