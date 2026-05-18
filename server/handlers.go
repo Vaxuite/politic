@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -625,6 +626,7 @@ func (s *server) council(w http.ResponseWriter, r *http.Request) {
 			}
 			entries = append(entries, partyVoteEntry{Party: e.party, Votes: e.v, Share: share})
 		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Votes > entries[j].Votes })
 		winners := []string{}
 		for _, w0 := range []string{s1, s2, s3} {
 			if w0 != "" {
