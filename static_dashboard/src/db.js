@@ -25,9 +25,9 @@ async function init() {
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
   const url = (f) => `${window.location.origin}${base}/data/${f}`
 
-  await db.registerFileURL('election_results.parquet', url('election_results.parquet'), duckdb.DuckDBDataProtocol.HTTP, false)
-  await db.registerFileURL('uk_wards.csv',             url('uk_wards.csv'),             duckdb.DuckDBDataProtocol.HTTP, false)
-  await db.registerFileURL('local_election_ward_2026.csv', url('local_election_ward_2026.csv'), duckdb.DuckDBDataProtocol.HTTP, false)
+  await db.registerFileURL('election_results.parquet',     url('election_results.parquet'),     duckdb.DuckDBDataProtocol.HTTP, false)
+  await db.registerFileURL('uk_wards.parquet',             url('uk_wards.parquet'),             duckdb.DuckDBDataProtocol.HTTP, false)
+  await db.registerFileURL('local_election_ward_2026.parquet', url('local_election_ward_2026.parquet'), duckdb.DuckDBDataProtocol.HTTP, false)
 
   const conn = await db.connect()
 
@@ -52,7 +52,7 @@ async function init() {
       "Candidate result position"       AS position
     FROM read_parquet('election_results.parquet')
   `)
-  await conn.query(`CREATE OR REPLACE VIEW uk_wards AS SELECT * FROM read_csv_auto('uk_wards.csv')`)
+  await conn.query(`CREATE OR REPLACE VIEW uk_wards AS SELECT * FROM read_parquet('uk_wards.parquet')`)
   await conn.query(`
     CREATE OR REPLACE VIEW local_2026 AS
     SELECT
@@ -68,7 +68,7 @@ async function init() {
       "Seat 3 Winner"                        AS seat3_winner,
       LAB, CON, LD, GREEN, REF, IND,
       "Other parties / candidates"           AS other_votes
-    FROM read_csv_auto('local_election_ward_2026.csv')
+    FROM read_parquet('local_election_ward_2026.parquet')
   `)
   // Bridge WD25 ward codes (uk_wards) and WD26 (local_2026) by a
   // normalised (ward_name, lad_name) key.

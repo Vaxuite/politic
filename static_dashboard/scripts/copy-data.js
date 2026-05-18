@@ -14,8 +14,8 @@ const projectRoot = resolve(here, '..')
 const dstDir = join(projectRoot, 'public', 'data')
 const files = [
   'election_results.parquet',
-  'local_election_ward_2026.csv',
-  'uk_wards.csv',
+  'local_election_ward_2026.parquet',
+  'uk_wards.parquet',
 ]
 
 // Find the data dir: explicit DATA_DIR wins, otherwise walk up from here
