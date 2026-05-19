@@ -5,8 +5,36 @@ import { Bar } from 'vue-chartjs'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend,
 } from 'chart.js'
+import PartyShareChart from '../components/PartyShareChart.vue'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
+
+const CANONICAL = {
+  'Labour': 'Labour',
+  'Labour and Co-operative': 'Labour',
+  'Conservative': 'Conservative',
+  'Liberal Democrats': 'Liberal Democrats',
+  'Liberal Democrat': 'Liberal Democrats',
+  'Reform UK': 'Reform UK',
+  'Brexit Party': 'Reform UK',
+  'UK Independence Party (UKIP)': 'UKIP',
+  'UK Independence Party': 'UKIP',
+  'UKIP': 'UKIP',
+  'Green Party': 'Green',
+  'Scottish Green Party': 'Green',
+  'Scottish National Party (SNP)': 'SNP',
+  'Scottish National Party': 'SNP',
+  'Plaid Cymru - The Party of Wales': 'Plaid Cymru',
+  'Plaid Cymru': 'Plaid Cymru',
+  'Democratic Unionist Party': 'DUP',
+  'Sinn Féin': 'Sinn Féin',
+  'Social Democratic & Labour Party': 'SDLP',
+  'Ulster Unionist Party': 'UUP',
+  'Alliance': 'Alliance',
+  'Alliance - Alliance Party of Northern Ireland': 'Alliance',
+}
+const PARTY_ORDER = ['Labour', 'Conservative', 'Liberal Democrats', 'Reform UK', 'UKIP', 'Green', 'SNP', 'Plaid Cymru', 'DUP', 'Sinn Féin', 'SDLP', 'UUP', 'Alliance', 'Other']
+function canonical(p) { return CANONICAL[p] ?? 'Other' }
 
 const props = defineProps({ code: String })
 const data = ref(null)
@@ -29,6 +57,33 @@ const partyColours = {
   'Plaid Cymru - The Party of Wales': '#3f8c2d',
 }
 function colourFor(p) { return partyColours[p] ?? '#888' }
+
+const shareOverTime = computed(() => {
+  if (!data.value) return null
+  const blocks = [...data.value.results].sort((a, b) => a.polling_date.localeCompare(b.polling_date))
+  const elections = blocks.map(b => b.polling_date)
+  const partyShares = new Map() // canonical party -> shares per election
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]
+    const total = b.valid_votes
+    const byParty = new Map()
+    for (const c of b.candidates) {
+      const k = canonical(c.party)
+      byParty.set(k, (byParty.get(k) ?? 0) + c.votes)
+    }
+    for (const [p, v] of byParty) {
+      if (!partyShares.has(p)) partyShares.set(p, new Array(blocks.length).fill(0))
+      partyShares.get(p)[i] = total > 0 ? (v * 100) / total : 0
+    }
+  }
+  const series = []
+  for (const p of PARTY_ORDER) {
+    if (partyShares.has(p) && partyShares.get(p).some(v => v > 0)) {
+      series.push({ party: p, shares: partyShares.get(p) })
+    }
+  }
+  return { elections, series }
+})
 
 const winnerByYear = computed(() => {
   if (!data.value) return []
@@ -93,6 +148,16 @@ function pct(votes, total) {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="shareOverTime && shareOverTime.series.length" class="card">
+      <h2>Vote share over time</h2>
+      <p class="subtitle" style="margin-bottom: 0.5rem">
+        Share of valid votes cast at each general election in this constituency, by main party.
+      </p>
+      <div class="chart-wrap" style="height: 360px">
+        <PartyShareChart :data="shareOverTime" />
+      </div>
     </div>
 
     <div v-for="block in data.results" :key="block.polling_date" class="card">
