@@ -10,6 +10,9 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 const props = defineProps({
   data: { type: Object, required: true }, // { elections, series }
+  valueKey: { type: String, default: 'shares' },
+  yLabel: { type: String, default: 'Share of vote (%)' },
+  unit: { type: String, default: '%' },
 })
 
 const partyColours = {
@@ -33,7 +36,7 @@ const chartData = computed(() => ({
   labels: props.data.elections.map(d => new Date(d).getFullYear()),
   datasets: props.data.series.map(s => ({
     label: s.party,
-    data: s.shares,
+    data: s[props.valueKey],
     borderColor: partyColours[s.party] ?? '#444',
     backgroundColor: partyColours[s.party] ?? '#444',
     tension: 0.25,
@@ -42,13 +45,13 @@ const chartData = computed(() => ({
   })),
 }))
 
-const chartOptions = {
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: { mode: 'index', intersect: false },
   scales: {
     y: {
-      title: { display: true, text: 'Share of vote (%)' },
+      title: { display: true, text: props.yLabel },
       min: 0,
     },
     x: { title: { display: true, text: 'General election' } },
@@ -57,11 +60,15 @@ const chartOptions = {
     legend: { position: 'bottom' },
     tooltip: {
       callbacks: {
-        label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`,
+        label: (ctx) => {
+          const v = ctx.parsed.y
+          const formatted = props.unit === '%' ? v.toFixed(1) + '%' : `${v} ${props.unit}`
+          return `${ctx.dataset.label}: ${formatted}`
+        },
       },
     },
   },
-}
+}))
 </script>
 
 <template>
