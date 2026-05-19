@@ -60,7 +60,7 @@ function colourFor(p) { return partyColours[p] ?? '#888' }
 
 const shareOverTime = computed(() => {
   if (!data.value) return null
-  const blocks = [...data.value.results].sort((a, b) => a.polling_date.localeCompare(b.polling_date))
+  const blocks = [...data.value.results].sort((a, b) => new Date(a.polling_date) - new Date(b.polling_date))
   const elections = blocks.map(b => b.polling_date)
   const partyShares = new Map() // canonical party -> shares per election
   for (let i = 0; i < blocks.length; i++) {
