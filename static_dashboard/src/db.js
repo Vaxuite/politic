@@ -189,6 +189,37 @@ export const db = {
     return { elections: dates, series, totals_by_election: totals }
   },
 
+  async seatsWon() {
+    const rows = await run(`
+      SELECT polling_date, party, COUNT(*)::BIGINT AS seats
+      FROM election_results
+      WHERE position = 1 AND party IS NOT NULL
+      GROUP BY polling_date, party
+      ORDER BY polling_date
+    `)
+    const perElection = new Map()
+    const dates = []
+    for (const r of rows) {
+      const date = r.polling_date
+      if (!perElection.has(date)) { perElection.set(date, new Map()); dates.push(date) }
+      const k = canonical(r.party)
+      const m = perElection.get(date)
+      m.set(k, (m.get(k) ?? 0) + Number(r.seats))
+    }
+    const series = []
+    for (const p of PARTY_ORDER) {
+      const seats = []
+      let any = false
+      for (const d of dates) {
+        const v = perElection.get(d).get(p) ?? 0
+        seats.push(v)
+        if (v > 0) any = true
+      }
+      if (any) series.push({ party: p, seats })
+    }
+    return { elections: dates, series }
+  },
+
   async search(q) {
     const term = (q ?? '').trim()
     if (!term) return { query: term, hits: [] }
