@@ -195,9 +195,13 @@ export const db = {
     const pattern = `%${term.toLowerCase()}%`
     const rows = await run(`
       WITH constituencies AS (
-        SELECT DISTINCT 'constituency' AS type, pcon_code AS code, constituency_name AS name, country AS ctx
+        SELECT 'constituency' AS type,
+               MAX(pcon_code)        AS code,
+               constituency_name     AS name,
+               any_value(country)    AS ctx
         FROM election_results
         WHERE lower(constituency_name) LIKE ? OR lower(pcon_code) LIKE ?
+        GROUP BY constituency_name
       ),
       councils AS (
         SELECT DISTINCT 'council' AS type, lad_code AS code, lad_name AS name, '' AS ctx
@@ -222,13 +226,21 @@ export const db = {
 
   async constituency(code) {
     const [head] = await run(`
-      SELECT constituency_name AS name, country, COALESCE(region,'') AS region
+      WITH input AS (
+        SELECT constituency_name AS name
+        FROM election_results
+        WHERE pcon_code = ?
+        LIMIT 1
+      )
+      SELECT constituency_name AS name, country, COALESCE(region,'') AS region,
+             MAX(pcon_code) OVER (PARTITION BY constituency_name) AS canonical_code
       FROM election_results
-      WHERE pcon_code = ?
+      WHERE constituency_name = (SELECT name FROM input)
       ORDER BY polling_date DESC
       LIMIT 1
     `, [code])
     if (!head) throw new Error('constituency not found')
+    const canonicalCode = head.canonical_code
 
     const candidates = await run(`
       SELECT polling_date, election_year AS year, electorate, valid_votes, result_summary,
@@ -236,9 +248,9 @@ export const db = {
         candidate_family_name AS family_name, COALESCE(party,'Unknown') AS party,
         candidate_votes AS votes, COALESCE(sitting_mp,false) AS sitting_mp
       FROM election_results
-      WHERE pcon_code = ?
+      WHERE constituency_name = ?
       ORDER BY polling_date DESC, position ASC
-    `, [code])
+    `, [head.name])
 
     const byDate = new Map()
     const order = []
@@ -269,13 +281,13 @@ export const db = {
       FROM uk_wards
       WHERE pcon_code = ?
       ORDER BY ward_name
-    `, [code])).map((w) => ({
+    `, [canonicalCode])).map((w) => ({
       code: w.code, name: w.name, lad_code: w.lad_code, lad_name: w.lad_name,
       split_ward: w.split_ward, primary: w.primary_ ?? null,
     }))
 
     return {
-      code, name: head.name, country: head.country, region: head.region,
+      code: canonicalCode, name: head.name, country: head.country, region: head.region,
       results: order.map((d) => byDate.get(d)),
       wards,
     }
